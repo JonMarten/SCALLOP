@@ -13,6 +13,7 @@ lapply(c("data.table", "dplyr", "stringr", "phenoscanner"), require, character.o
 # Read in INF1 results
 clumpedPath <- "Z:/Factors/High_dimensional_genetics/Olink/INF1/INF1.clumped.tbl"
 inf1 <- fread(clumpedPath, data.table=F)
+inf1 <- inf1[1:10,] # Truncate for testing 
 
 # Reform columns to remove hyphens and separate data
 prot <- str_split_fixed(inf1$Chromosome, ":", 2)
@@ -25,22 +26,26 @@ inf1 <- inf1 %>%
 
 #Lookup in phenoscanner
 infAnnotated <- data.frame()
-i = 1
+allTraitsList <- character()
+allGWASResults <- list()
+#i = 1
 for(i in 1:nrow(inf1)){
   infRow <- inf1[i,]
   gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS")
-  eQTL <- phenoscanner(snpquery = inf1$psName[i], catalogue = "eQTL")
-  pQTL <- phenoscanner(snpquery = inf1$psName[i], catalogue = "pQTL")
+  if(nrow(gwas$results) > 0){
+    gwas$results$traitName <- paste0(gwas$results$trait," (",gwas$results$pmid,")") 
+  } else {
+    gwas$results <- data.frame("traitName" = "None", stringsAsFactors = F)
+  }
   
   infRow <- infRow %>%
     mutate(rsid = gwas$snps$rsid,
            consequence = gwas$snps$consequence,
            hgnc = gwas$snps$hgnc,
-           gwas = paste(unlist(unique(gwas$results$trait)), collapse = "; "),
-           eQTL = paste(unlist(unique(eQTL$results$trait)), collapse = "; "),
-           pQTL = paste(unlist(unique(pQTL$results$trait)), collapse = "; "))
+           gwas = paste(unlist(unique(gwas$results$traitName)), collapse = "; "))
   infAnnotated <- bind_rows(infAnnotated, infRow)
-  rm(gwas, eQTL, pQTL,infRow)
+  allGWASResults[[i]] <- gwas$results
+  allTraitsList <- c(allTraitsList, gwas$results$traitName)
+  allTraitsList <- unique(allTraitsList)
+  rm(gwas, infRow)
 }
-
-
