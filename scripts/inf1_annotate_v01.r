@@ -49,3 +49,16 @@ for(i in 1:nrow(inf1)){
   allTraitsList <- unique(allTraitsList)
   rm(gwas, infRow)
 }
+
+# Create matrix of associated traits
+traitMat <- matrix(0,nrow = nrow(infAnnotated), 
+                   ncol = length(allTraitsList), 
+                   dimnames = list(paste0(infAnnotated$Protein, ":",infAnnotated$rsid),allTraitsList))
+
+for(i in 1:nrow(infAnnotated)){
+  if(infAnnotated$gwas[i] != "None"){
+    colNums <- match(allGWASResults[[i]]$traitName, colnames(traitMat))
+    traitMat[i,colNums] <- -log10(as.numeric(allGWASResults[[i]]$p)) 
+  }    
+}
+
