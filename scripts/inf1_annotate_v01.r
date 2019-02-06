@@ -31,7 +31,7 @@ allGWASResults <- list()
 #i = 1
 for(i in 1:nrow(inf1)){
   infRow <- inf1[i,]
-  gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS", pvalue = 5e-8)
+  gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS", pvalue = (5e-8/nrow(infRow)))
   if(nrow(gwas$results) > 0){
     gwas$results$traitName <- paste0(gwas$results$trait," (",gwas$results$pmid,")") 
   } else {
@@ -62,15 +62,24 @@ for(i in 1:nrow(infAnnotated)){
   }    
 }
 
-
-
+traitMat[which(is.infinite(traitMat))] <- 300 # deal with infinite values from P = 0
+traitMat <- traitMat[,-which(colnames(traitMat)=="None")] # remove SNPs with no GWAS hits
 # Plot heatmap
-# png(filename=paste0("plots/urate_olink_correlations_All_corrplot_AnySigPheno_",timestamp,".png"),
-#     type="cairo",
-#     units="in",
-#     width=6,
-#     height=14,
-#     pointsize=10,
-#     res=96)
-  pheatmap(traitMat[1:111,], color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
-# dev.off()
+ png(filename="SCALLOP_INF1_phenoscanner_gwas_heatmap.png",
+     type="cairo",
+     units="px",
+     width=10000,
+     height=10000,
+     pointsize=10,
+     res=400)
+  pheatmap(traitMat, color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
+ dev.off()
+
+# Heatmap only with phenos associated with >1 SNP
+counts <- apply(traitMat,MARGIN = 2, FUN = function(x){length(which(x!=0))})
+traitMatFilt <- traitMat[,which(counts > 5)]
+zeros <- apply(traitMatFilt,MARGIN = 1, FUN = sum) # remove SNPs with no phenos left
+traitMatFilt <- traitMatFilt[which(zeros != 0),]
+pdf("SCALLOP_INF1_phenoscanner_gwas_heatmap.pdf", width=10, height=10)
+pheatmap(t(traitMatFilt), color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.8)
+dev.off()
