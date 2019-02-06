@@ -8,12 +8,12 @@
 
 # Set WD and set up libraries
 setwd("C:/Users/Jonathan/Documents/CEU/R_projects/SCALLOP/")
-lapply(c("data.table", "dplyr", "stringr", "phenoscanner"), require, character.only = T)
+lapply(c("data.table", "dplyr", "stringr", "phenoscanner", "pheatmap"), require, character.only = T)
 
 # Read in INF1 results
 clumpedPath <- "Z:/Factors/High_dimensional_genetics/Olink/INF1/INF1.clumped.tbl"
 inf1 <- fread(clumpedPath, data.table=F)
-inf1 <- inf1[1:10,] # Truncate for testing 
+#inf1 <- inf1[1:10,] # Truncate for testing 
 
 # Reform columns to remove hyphens and separate data
 prot <- str_split_fixed(inf1$Chromosome, ":", 2)
@@ -31,7 +31,7 @@ allGWASResults <- list()
 #i = 1
 for(i in 1:nrow(inf1)){
   infRow <- inf1[i,]
-  gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS")
+  gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS", pvalue = 5e-8)
   if(nrow(gwas$results) > 0){
     gwas$results$traitName <- paste0(gwas$results$trait," (",gwas$results$pmid,")") 
   } else {
@@ -62,3 +62,15 @@ for(i in 1:nrow(infAnnotated)){
   }    
 }
 
+
+
+# Plot heatmap
+# png(filename=paste0("plots/urate_olink_correlations_All_corrplot_AnySigPheno_",timestamp,".png"),
+#     type="cairo",
+#     units="in",
+#     width=6,
+#     height=14,
+#     pointsize=10,
+#     res=96)
+  pheatmap(traitMat[1:111,], color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
+# dev.off()
