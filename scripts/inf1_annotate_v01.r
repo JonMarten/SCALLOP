@@ -28,7 +28,7 @@
   for(i in 1:ceiling(nrow(inf1)/100)){
     startrow <- (i-1)*100 + 1
     endrow <- min(nrow(inf1), (i-1)*100 + 100)
-    ps <- phenoscanner(snpquery = inf1$psName[startrow:endrow], pvalue = 0.05/nrow(inf1))
+    ps <- phenoscanner(snpquery = inf1$psName[startrow:endrow], pvalue = 5e-8/nrow(inf1))
     # Convert PS output to sensible classes
     snpStrings <- c("snp","rsid","hg19_coordinates", "hg38_coordinates","a1","a2", "consequence","amino_acids","ensembl","hgnc")
     snpNums <<- c("pos_hg19","pos_hg38","afr","amr","eas","eur","sas","protein_position")
@@ -117,7 +117,116 @@ psResults2 <- psResults %>%
          
 
 fwrite(psResults2, file = "SCALLOP_INF1_phenoscanner_gwas_allResults.csv", na = "NA")
+ 
+### Simplified query combining SNPs that are pQTLs for multiple proteins
+
+infSmall <- inf1 %>% select(Protein,psName) %>% 
+  group_by(psName) %>% 
+  summarise(numAssocs = n(), prots = paste(Protein, collapse = ";")) %>%
+  data.frame()
+
+rm(psResultsSmall)
+for(i in 1:ceiling(nrow(infSmall)/100)){
+  startrow <- (i-1)*100 + 1
+  endrow <- min(nrow(infSmall), (i-1)*100 + 100)
+  ps <- phenoscanner(snpquery = infSmall$psName[startrow:endrow], pvalue = 5e-8/nrow(infSmall))
+  # Convert PS output to sensible classes
+  snpStrings <- c("snp","rsid","hg19_coordinates", "hg38_coordinates","a1","a2", "consequence","amino_acids","ensembl","hgnc")
+  snpNums <<- c("pos_hg19","pos_hg38","afr","amr","eas","eur","sas","protein_position")
+  snpNums <- names(ps$snps)[which(!names(ps$snps) %in% snpStrings)]
   
+  # Replace "-" coding with NA to avoid warnings
+  dash <- which(levels(ps$snps$protein_position)=="-")
+  if(length(dash) > 0){
+    levels(ps$snps$protein_position)[dash] <- NA
+  }
+  ps$snps <- ps$snps %>%
+    mutate_at(snpStrings, as.character) %>%
+    mutate_at(snpNums, function(x){as.numeric(as.character(x))})
+  
+  resStrings <- c("snp","rsid","hg19_coordinates", "hg38_coordinates","a1","a2", "trait","efo","study","pmid","ancestry","direction","unit","dataset")
+  resNums <- names(ps$results)[which(!names(ps$results) %in% resStrings)]
+  
+  ps$results <- ps$results %>%
+    mutate_at(resStrings, as.character) %>%
+    mutate_at(resNums, function(x){as.numeric(as.character(x))})
+  
+  if(!exists("psResultsSmall")){
+    psResultsSmall <- ps
+  } else {
+    psResultsSmall$snps <- rbind(psResultsSmall$snps, ps$snps)
+    psResultsSmall$results <- rbind(psResultsSmall$results, ps$results)
+  } 
+  rm(ps, startrow, endrow)
+}  
+
+# Merge phenoscanner output with infSmall
+psResultsSmall <- right_join(psResultsSmall$snps, psResultsSmall$results)
+names(psResultsSmall) <- paste0(names(psResultsSmall),".ps")
+psResultsSmall <- rename(psResultsSmall, psName = snp.ps)
+psResultsSmall <- full_join(infSmall, psResultsSmall)
+psResultsSmall <- distinct(psResultsSmall) # remove duplicated rows, not sure why these appear and too lazy to figure it out right now.
+
+# Look up proxies for SNPs with no results found  
+#  missRow <- which(inf1$psName %in% psResults2$psName)
+#  inf1Proxy <- inf1[missRow,]
+#  psProxy <- phenoscanner(inf1Proxy$psName, proxies = "EUR", r2 = 0.8)
+
+psResultsSmall$rsid.ps[which(is.na(psResultsSmall$rsid.ps))] <- psResultsSmall$psName[which(is.na(psResultsSmall$rsid.ps))]
+psResultsSmall$snpProt <- paste0(psResultsSmall$rsid.ps," (",psResultsSmall$prots,")")
+
+psMeltSmall <- psResultsSmall %>%
+  select(snpProt, trait.ps, p.ps) %>%
+  mutate(logP = -log10(p.ps)) %>%
+  select(-p.ps) %>%
+  filter(trait.ps %in% names(which(table(psMelt$trait.ps) > 10)))
+  
+psCastSmall <- acast(psMelt, snpProt ~ trait.ps)  
+
+
+pheatmap(psCastSmall, color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
+
+psResults %>% 
+  group_by(Protein) %>%
+  summarise(n()) %>%
+  data.frame()
+
+psResults2 <- psResults %>%
+  select(Protein,
+         rsid = rsid.ps,
+         Chromosome,
+         Position,
+         Allele1,
+         Allele2,
+         Freq1,
+         Effect,
+         StdErr,
+         "P-value",
+         Direction,
+         N,
+         a1.ps,
+         a2.ps,
+         eur.ps,
+         consequence.ps,
+         hgnc.ps,
+         trait.ps,
+         pmid.ps,
+         ancestry.ps,
+         beta.ps,
+         se.ps,
+         p.ps,
+         n.ps,
+         n_cases.ps,
+         n_controls.ps,
+         n_studies.ps,
+         unit.ps)
+
+
+fwrite(psResults2, file = "SCALLOP_INF1_phenoscanner_gwas_allResults.csv", na = "NA")
+
+
+
+ 
 ### Old code
     
 #Lookup in phenoscanner, 1 at a time
