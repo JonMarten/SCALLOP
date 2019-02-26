@@ -24,19 +24,100 @@
     select(Protein, psName, Chromosome:N)
 
 # Submit SNPs to phenoscanner, 100 at a time
+  rm(psResults)
   for(i in 1:ceiling(nrow(inf1)/100)){
     startrow <- (i-1)*100 + 1
     endrow <- min(nrow(inf1), (i-1)*100 + 100)
-    ps <- phenoscanner(snpquery = inf1$psName[startrow:endrow])
+    ps <- phenoscanner(snpquery = inf1$psName[startrow:endrow], pvalue = 0.05/nrow(inf1))
+    # Convert PS output to sensible classes
+    snpStrings <- c("snp","rsid","hg19_coordinates", "hg38_coordinates","a1","a2", "consequence","amino_acids","ensembl","hgnc")
+    snpNums <<- c("pos_hg19","pos_hg38","afr","amr","eas","eur","sas","protein_position")
+    snpNums <- names(ps$snps)[which(!names(ps$snps) %in% snpStrings)]
     
-    if(!exists(psResults)){
+    # Replace "-" coding with NA to avoid warnings
+      dash <- which(levels(ps$snps$protein_position)=="-")
+      if(length(dash) > 0){
+        levels(ps$snps$protein_position)[dash] <- NA
+      }
+      ps$snps <- ps$snps %>%
+        mutate_at(snpStrings, as.character) %>%
+        mutate_at(snpNums, function(x){as.numeric(as.character(x))})
+    
+    resStrings <- c("snp","rsid","hg19_coordinates", "hg38_coordinates","a1","a2", "trait","efo","study","pmid","ancestry","direction","unit","dataset")
+    resNums <- names(ps$results)[which(!names(ps$results) %in% resStrings)]
+  
+    ps$results <- ps$results %>%
+      mutate_at(resStrings, as.character) %>%
+      mutate_at(resNums, function(x){as.numeric(as.character(x))})
+  
+  if(!exists("psResults")){
       psResults <- ps
     } else {
       psResults$snps <- rbind(psResults$snps, ps$snps)
       psResults$results <- rbind(psResults$results, ps$results)
-    }  
+    } 
+    rm(ps, startrow, endrow)
   }  
+
+# Merge phenoscanner output with inf
+  psResults <- right_join(psResults$snps, psResults$results)
+  names(psResults) <- paste0(names(psResults),".ps")
+  psResults <- rename(psResults, psName = snp.ps)
+  psResults <- full_join(inf1, psResults)
+  psResults <- distinct(psResults) # remove duplicated rows, not sure why these appear and too lazy to figure it out right now.
     
+# Look up proxies for SNPs with no results found  
+#  missRow <- which(inf1$psName %in% psResults2$psName)
+#  inf1Proxy <- inf1[missRow,]
+#  psProxy <- phenoscanner(inf1Proxy$psName, proxies = "EUR", r2 = 0.8)
+    
+  psMelt <- psResults %>%
+    select(Protein, trait.ps, p.ps) %>%
+    mutate(logP = -log10(p.ps)) %>%
+    select(-p.ps)
+  psCast <- acast(psMelt, Protein ~ trait.ps)  
+  
+  
+  pheatmap(psCast, color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
+  
+  psResults %>% 
+  group_by(Protein) %>%
+  summarise(n()) %>%
+  data.frame()
+  
+psResults2 <- psResults %>%
+  select(Protein,
+         rsid = rsid.ps,
+         Chromosome,
+         Position,
+         Allele1,
+         Allele2,
+         Freq1,
+         Effect,
+         StdErr,
+         "P-value",
+         Direction,
+         N,
+         a1.ps,
+         a2.ps,
+         eur.ps,
+         consequence.ps,
+         hgnc.ps,
+         trait.ps,
+         pmid.ps,
+         ancestry.ps,
+         beta.ps,
+         se.ps,
+         p.ps,
+         n.ps,
+         n_cases.ps,
+         n_controls.ps,
+         n_studies.ps,
+         unit.ps)
+         
+
+fwrite(psResults2, file = "SCALLOP_INF1_phenoscanner_gwas_allResults.csv", na = "NA")
+  
 ### Old code
     
 #Lookup in phenoscanner, 1 at a time
