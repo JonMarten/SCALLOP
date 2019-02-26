@@ -6,49 +6,67 @@
 #install_github("phenoscanner/phenoscanner")
 #library(phenoscanner)
 
-# Set WD and set up libraries
-setwd("C:/Users/Jonathan/Documents/CEU/R_projects/SCALLOP/")
-lapply(c("data.table", "dplyr", "stringr", "phenoscanner", "pheatmap"), require, character.only = T)
+# Setup
+  setwd("C:/Users/Jonathan/Documents/CEU/R_projects/SCALLOP/")
+  lapply(c("data.table", "dplyr", "stringr", "phenoscanner", "pheatmap"), require, character.only = T)
 
 # Read in INF1 results
-clumpedPath <- "Z:/Factors/High_dimensional_genetics/Olink/INF1/INF1.clumped.tbl"
-inf1 <- fread(clumpedPath, data.table=F)
-#inf1 <- inf1[1:10,] # Truncate for testing 
+  clumpedPath <- "Z:/Factors/High_dimensional_genetics/Olink/INF1/INF1.clumped.tbl"
+  inf1 <- fread(clumpedPath, data.table=F)
 
 # Reform columns to remove hyphens and separate data
-prot <- str_split_fixed(inf1$Chromosome, ":", 2)
-markerName <- str_split_fixed(inf1$MarkerName,"_",2)
-inf1 <- inf1 %>%
-  mutate(Chromosome = as.numeric(prot[,2]),
-         Protein = prot[,1],
-         psName = markerName[,1]) %>%
-  select(Protein, psName, Chromosome:N)
+  prot <- str_split_fixed(inf1$Chromosome, ":", 2)
+  markerName <- str_split_fixed(inf1$MarkerName,"_",2)
+  inf1 <- inf1 %>%
+    mutate(Chromosome = as.numeric(prot[,2]),
+           Protein = prot[,1],
+           psName = markerName[,1]) %>%
+    select(Protein, psName, Chromosome:N)
 
-#Lookup in phenoscanner
-infAnnotated <- data.frame()
-allTraitsList <- character()
-allGWASResults <- list()
-#i = 1
-for(i in 1:nrow(inf1)){
-  infRow <- inf1[i,]
-  gwas <- phenoscanner(snpquery = inf1$psName[i], catalogue = "GWAS", pvalue = (5e-8/nrow(infRow)))
-  if(nrow(gwas$results) > 0){
-    gwas$results$traitName <- paste0(gwas$results$trait," (",gwas$results$pmid,")") 
-  } else {
-    gwas$results <- data.frame("traitName" = "None", stringsAsFactors = F)
-  }
-  
-  infRow <- infRow %>%
-    mutate(rsid = gwas$snps$rsid,
-           consequence = gwas$snps$consequence,
-           hgnc = gwas$snps$hgnc,
-           gwas = paste(unlist(unique(gwas$results$traitName)), collapse = "; "))
-  infAnnotated <- bind_rows(infAnnotated, infRow)
-  allGWASResults[[i]] <- gwas$results
-  allTraitsList <- c(allTraitsList, gwas$results$traitName)
-  allTraitsList <- unique(allTraitsList)
-  rm(gwas, infRow)
-}
+# Submit SNPs to phenoscanner, 100 at a time
+  for(i in 1:ceiling(nrow(inf1)/100)){
+    startrow <- (i-1)*100 + 1
+    endrow <- min(nrow(inf1), (i-1)*100 + 100)
+    ps <- phenoscanner(snpquery = inf1$psName[startrow:endrow])
+    
+    if(!exists(psResults)){
+      psResults <- ps
+    } else {
+      psResults$snps <- rbind(psResults$snps, ps$snps)
+      psResults$results <- rbind(psResults$results, ps$results)
+    }  
+  }  
+    
+### Old code
+    
+#Lookup in phenoscanner, 1 at a time
+  # Initialise empty data frames
+    infAnnotated <- data.frame()
+    allTraitsList <- character()
+    allGWASResults <- list()
+  # Loop over all SNPs
+    for(i in 1:nrow(inf1)){
+      infRow <- inf1[i,]
+      gwas <- phenoscanner(snpquery = inf1$psName[i], 
+                           catalogue = "GWAS", 
+                           pvalue = (5e-8/nrow(infRow)))
+      if(nrow(gwas$results) > 0){
+        gwas$results$traitName <- paste0(gwas$results$trait," (",gwas$results$pmid,")") 
+      } else {
+        gwas$results <- data.frame("traitName" = "None", stringsAsFactors = F)
+      }
+      
+      infRow <- infRow %>%
+        mutate(rsid = gwas$snps$rsid,
+               consequence = gwas$snps$consequence,
+               hgnc = gwas$snps$hgnc,
+               gwas = paste(unlist(unique(gwas$results$traitName)), collapse = "; "))
+      infAnnotated <- bind_rows(infAnnotated, infRow)
+      allGWASResults[[i]] <- gwas$results
+      allTraitsList <- c(allTraitsList, gwas$results$traitName)
+      allTraitsList <- unique(allTraitsList)
+      rm(gwas, infRow)
+    }
 
 # Create matrix of associated traits
 traitMat <- matrix(0,nrow = nrow(infAnnotated), 
@@ -64,6 +82,11 @@ for(i in 1:nrow(infAnnotated)){
 
 traitMat[which(is.infinite(traitMat))] <- 300 # deal with infinite values from P = 0
 traitMat <- traitMat[,-which(colnames(traitMat)=="None")] # remove SNPs with no GWAS hits
+
+traitMatOut <- data.frame(traitMat)
+
+fwrite(traitMatOut, file = "SCALLOP_INF1_phenoscanner_gwas_matrix.csv", sep = ",", row.names = T)
+
 # Plot heatmap
  png(filename="SCALLOP_INF1_phenoscanner_gwas_heatmap.png",
      type="cairo",
@@ -73,11 +96,11 @@ traitMat <- traitMat[,-which(colnames(traitMat)=="None")] # remove SNPs with no 
      pointsize=10,
      res=400)
   pheatmap(traitMat, color = colorRampPalette(c("white","firebrick2"))(200), cex = 0.2)
- dev.off()
+ # dev.off()
 
-# Heatmap only with phenos associated with >1 SNP
+# Heatmap only with phenos associated with >5 SNPs
 counts <- apply(traitMat,MARGIN = 2, FUN = function(x){length(which(x!=0))})
-traitMatFilt <- traitMat[,which(counts > 5)]
+traitMatFilt <- traitMat[,which(counts > 10)]
 zeros <- apply(traitMatFilt,MARGIN = 1, FUN = sum) # remove SNPs with no phenos left
 traitMatFilt <- traitMatFilt[which(zeros != 0),]
 pdf("SCALLOP_INF1_phenoscanner_gwas_heatmap.pdf", width=10, height=10)
