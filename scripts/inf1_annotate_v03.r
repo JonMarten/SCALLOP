@@ -94,7 +94,6 @@ for(i in 1:length(dupePhenos)){
   rm(keeprow, subset, eaRows)
 }
 
-psResultsSmall2 <- psResultsSmall #backup   
 psResultsSmall <- psResultsSmall %>%
   filter(!snpTrait %in% dupePhenos)
 psResultsSmall <- rbind(psResultsSmall, dupesFiltered)
@@ -159,9 +158,9 @@ fwrite(allSummary, file = "efo_list.csv")
                                   trait.ps, 
                                   tr$traitName[match(efo.ps, tr$EFO)])
            )
-  diseases <- tr$traitName[tr$disease == 1]
-  inflam <- tr$traitName[tr$inflammation == 1]
-  infdis <-  tr$traitName[tr$inflammation == 1 & tr$disease == 1]
+  diseases <- tr$traitName[tr$clinical == 1]
+  inflam <- tr$traitName[tr$immune_mediated == 1]
+  infdis <-  tr$traitName[tr$immune_mediated == 1 & tr$clinical == 1]
   
 # Convert to a contingency table for easy pheatmapping
 psMeltSmall <- psResultsSmall2 %>%
@@ -172,7 +171,7 @@ psMeltSmall <- psResultsSmall2 %>%
 
 
 
-# Filter to only traits associated with >2 SNPs
+# Filter to only traits associated with >0 SNPs
 psMeltSmallFilt <- psMeltSmall %>%
   filter(traitPlotName %in% names(which(table(psMeltSmall$traitPlotName) > 0))) %>%
   filter(!is.na(logP)) %>%  
@@ -187,10 +186,38 @@ psCastSmallFilt <- acast(psMeltSmallFilt,
 psCastSmallFilt[which(is.na(psCastSmallFilt), arr.ind = T)] <- 0
 psCastSmallFilt[which(is.infinite(psCastSmallFilt), arr.ind = T)] <- 1
 
-pheatmap(t(psCastSmallFilt), color = colorRampPalette(c("white","firebrick2"))(10), legend = F)
+# To refine heatmap, output matrix as CSV and manually combine columns that tag multiple phenotypes already included, update plot names, then reimport. Would be nice to automate but probably too time consuming for too little gain
+write.table(psCastSmallFilt, file = "heatmap_plot_matrix_toedit.csv", row.names = T, col.names = T, sep = ",")
 
-pdf(file = "SCALLOP_INF1_phenoscanner_gwas_small_heatmap_2plus_binary.pdf", height = 20, width = 20)
-pheatmap(t(psCastSmallFilt), color = colorRampPalette(c("white","firebrick2"))(200), cex = 1,border_color = "gray50")
-dev.off()
+plotdf <- fread("heatmap_plot_matrix_edited.csv", data.table = F)
+plotmat <- as.matrix(plotdf[,-1])
+rownames(plotmat) <- plotdf[,1]
+
+pheatmap(mat = plotmat, 
+         color = colorRampPalette(c("white","#4287f5"))(10), 
+         legend = F,
+         main = "Olink pQTLs overlapping with QTLs for immune-mediated clinical outcomes",
+         angle_col = "45", 
+         filename = "SCALLOP_INF1_pQTL_immune-mediated_clinical_qtl_heatmap.png",
+         width = 16,
+         height = 10,
+         treeheight_row = 100,
+         treeheigh_col = 100,
+         cellheight = 20,
+         cellwidth = 20)
+
+pheatmap(mat = plotmat, 
+         color = colorRampPalette(c("white","#4287f5"))(10), 
+         legend = F,
+         main = "Olink pQTLs overlapping with QTLs for immune-mediated clinical outcomes",
+         angle_col = "45", 
+         filename = "SCALLOP_INF1_pQTL_immune-mediated_clinical_qtl_heatmap_unclustered.png",
+         width = 16,
+         height = 10,
+         cluster_rows = F,
+         cluster_cols = F,
+         cellheight = 20,
+         cellwidth = 20)
+
 
 write.csv(psResultsSmall, row.names=F, file = "SCALLOP_INF1_phenoscanner_gwas_annotations.csv")
