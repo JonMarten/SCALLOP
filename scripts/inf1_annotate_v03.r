@@ -4,8 +4,18 @@
 setwd("/home/jm2294/rds/rds-jmmh2-projects/olink_proteomics/scallop/jm2294")
 lapply(c("data.table", "dplyr", "stringr", "phenoscanner", "pheatmap", "reshape2"), require, character.only = T)
 
-# Read in INF1 results
+# Read in INF1 conditionally independent results and merge to re-add betas
 inf1 <- fread("INF1.merge", data.table=F)
+fullRes <- fread("INF1.tbl", data.table = F)
+pr <- str_split_fixed(fullRes$Chromosome, ":", 2)
+fullRes <- fullRes %>%
+  mutate(prot = pr[,1],
+         Chr = as.numeric(pr[,2])) %>%
+  mutate(SNPprot = paste0(prot, ":", MarkerName))
+inf1 <- inf1 %>%
+  mutate(SNPprot = paste0(prot, ":", MarkerName))
+inf1 <- left_join(inf1, fullRes)
+
 sigThresh <- 5e-8 / nrow(inf1)
 
 # Reform columns to remove hyphens and separate data
@@ -59,8 +69,9 @@ for(i in 1:ceiling(nrow(infSmall)/100)){
 # Convert phenoscanner output to data frame instead of list
 psResultsSmall <- right_join(psResultsSmall$snps, psResultsSmall$results)
 
-# Where a SNP is assocaited with a trait more than once, pick EA first, then largest study, or if no n is available, pick smallest P-value
+# Where a SNP is assocaited with a trait more than once, pick EA first, then largest study, or if no n is available, pick smallest P-value. Remove any SNPs with no beta values in phenoscanner
 psResultsSmall <- psResultsSmall %>%
+  filter(!is.na(beta)) %>%
   mutate(snpTrait = paste0(snp, trait))
 
 dupes <- duplicated(psResultsSmall$snpTrait)
@@ -98,12 +109,21 @@ psResultsSmall <- psResultsSmall %>%
   filter(!snpTrait %in% dupePhenos)
 psResultsSmall <- rbind(psResultsSmall, dupesFiltered)
 
-# Merge phenoscanner output with infSmall  
+# Merge phenoscanner output with inf1
+inf1b <- inf1 %>% 
+  select(psName, prots = prot, Allele1, Allele2, Effect, StdErr)
+
 names(psResultsSmall) <- paste0(names(psResultsSmall),".ps")
 psResultsSmall <- rename(psResultsSmall, psName = snp.ps)
-psResultsSmall <- full_join(infSmall, psResultsSmall)
+psResultsSmall <- full_join(inf1b, psResultsSmall)
 psResultsSmall <- distinct(psResultsSmall) # remove duplicated rows, not sure why these appear and too lazy to figure it out right now.
 
+# check for beta direction match
+psResultsSmall <- psResultsSmall %>%
+  mutate(alleleMismatch = ifelse(toupper(a1.ps) == toupper(Allele1), 0, 1)) %>%
+  mutate(betaFlip.ps = ifelse(alleleMismatch == 1, -beta.ps, beta.ps)) %>%
+  mutate(betaMatch = ifelse(is.na(betaFlip.ps), 999, ifelse(sign(betaFlip.ps) == sign(Effect), 1, -1)))
+  
 # Look up proxies for SNPs with no results found  
 #  missRow <- which(inf1$psName %in% psResults2$psName)
 #  inf1Proxy <- inf1[missRow,]
@@ -113,7 +133,7 @@ psResultsSmall <- distinct(psResultsSmall) # remove duplicated rows, not sure wh
 noRS <- which(is.na(psResultsSmall$rsid.ps))
 psResultsSmall$rsid.ps[noRS] <- psResultsSmall$psName[noRS]
 psResultsSmall <- psResultsSmall %>%
-  mutate(snpProt = paste0(rsid.ps," (gene: ",hgnc.ps,", Olink: ", prots,")"))
+  mutate(snpProt = paste0(rsid.ps," (",hgnc.ps,"): ", prots))
 
 # List all SNPs and their associated traits  
 snpProtSummary <- psResultsSmall %>% 
@@ -164,7 +184,7 @@ fwrite(allSummary, file = "efo_list.csv")
   
 # Convert to a contingency table for easy pheatmapping
 psMeltSmall <- psResultsSmall2 %>%
-  select(snpProt, traitPlotName, p.ps) %>%
+  select(snpProt, traitPlotName, p.ps, betaMatch) %>%
   mutate(logP = -log10(p.ps),
          binP = ifelse(p.ps < sigThresh, 1, 0)) %>%
   filter(traitPlotName %in% infdis)
@@ -180,8 +200,15 @@ psMeltSmallFilt <- psMeltSmall %>%
 
 psCastSmallFilt <- acast(psMeltSmallFilt, 
                          snpProt ~ traitPlotName,
-                         value.var = "binP",
-                         fun.aggregate = function(x){x[1]}) # why max doesn't work here I have no idea, but it just returns Inf every time. 
+                         value.var = "betaMatch",
+                         fun.aggregate = function(x){x[1]}) 
+
+#psCastSmallFilt <- acast(psMeltSmallFilt, 
+#                         snpProt ~ traitPlotName,
+#                         value.var = "betaMatch",
+#                         fun.aggregate = function(x){paste0(unique(x),collapse = ",")}) 
+
+# why max doesn't work here I have no idea, but it just returns Inf every time. 
 
 psCastSmallFilt[which(is.na(psCastSmallFilt), arr.ind = T)] <- 0
 psCastSmallFilt[which(is.infinite(psCastSmallFilt), arr.ind = T)] <- 1
@@ -194,8 +221,8 @@ plotmat <- as.matrix(plotdf[,-1])
 rownames(plotmat) <- plotdf[,1]
 
 pheatmap(mat = plotmat, 
-         color = colorRampPalette(c("white","#4287f5"))(10), 
-         legend = F,
+         color = colorRampPalette(c("#4287f5","#ffffff","#e32222"))(3), 
+         legend = T,
          main = "Olink pQTLs overlapping with QTLs for immune-mediated clinical outcomes",
          angle_col = "45", 
          filename = "SCALLOP_INF1_pQTL_immune-mediated_clinical_qtl_heatmap.png",
@@ -207,8 +234,8 @@ pheatmap(mat = plotmat,
          cellwidth = 20)
 
 pheatmap(mat = plotmat, 
-         color = colorRampPalette(c("white","#4287f5"))(10), 
-         legend = F,
+         color = colorRampPalette(c("#4287f5","#ffffff","#e32222"))(3), 
+         legend = T,
          main = "Olink pQTLs overlapping with QTLs for immune-mediated clinical outcomes",
          angle_col = "45", 
          filename = "SCALLOP_INF1_pQTL_immune-mediated_clinical_qtl_heatmap_unclustered.png",
@@ -221,3 +248,7 @@ pheatmap(mat = plotmat,
 
 
 write.csv(psResultsSmall, row.names=F, file = "SCALLOP_INF1_phenoscanner_gwas_annotations.csv")
+# psResultsSmall<- fread("SCALLOP_INF1_phenoscanner_gwas_annotations.csv", data.table = F)
+
+
+
