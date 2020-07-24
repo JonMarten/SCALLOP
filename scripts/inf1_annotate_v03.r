@@ -197,7 +197,6 @@ psMeltSmallFilt <- psMeltSmall %>%
   filter(!is.na(logP)) %>%  
   distinct()
 
-
 psCastSmallFilt <- acast(psMeltSmallFilt, 
                          snpProt ~ traitPlotName,
                          value.var = "betaMatch",
@@ -250,5 +249,21 @@ pheatmap(mat = plotmat,
 write.csv(psResultsSmall, row.names=F, file = "SCALLOP_INF1_phenoscanner_gwas_annotations.csv")
 # psResultsSmall<- fread("SCALLOP_INF1_phenoscanner_gwas_annotations.csv", data.table = F)
 
+# Make filtered results file for paper
+resTab <- psResultsSmall2 %>%
+  filter(paste0(snpProt, traitPlotName) %in% paste0(psMeltSmallFilt$snpProt, psMeltSmallFilt$traitPlotName))
+ # select("RSID" = rsid.ps,
+ #        "chr" = chr.ps,
+ #        "pos_hg19" = pos_hg19.ps,
+ #        "A1" = Allele1,
+ #        "A2" = Allele2,
+ #        "protein" = prots,
+ #        "Beta_olink" = Effect,
+ #        "SE_olink" = StdErr,
+ #        "Beta_phenoscanner" = betaFlip.ps,
+ #        "Consequence_phenoscanner" = consequence.ps,
+ #        
+         
+         
 
-
+write.csv(resTab, quote = T, row.names = F, file = "SCALLOP_INF1_phenoscanner_gwas_filtered_associations.csv")
